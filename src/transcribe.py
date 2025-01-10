@@ -51,6 +51,9 @@ def main():
     parser.add_argument('--artist', help='Artist name for lyrics lookup')
     parser.add_argument('--track', help='Track name for lyrics lookup')
     parser.add_argument('--skip-transcription', action='store_true', help='Skip transcription and use existing JSON file to generate LRC')
+    parser.add_argument('--timestamp', action='store_true', help='Add timestamp to output filenames')
+    parser.add_argument('--break-threshold', type=float, default=5.0,
+                        help='Time in seconds to consider as an instrumental break (default: 5.0)')
     args = parser.parse_args()
 
     # Determine output file path
@@ -58,25 +61,49 @@ def main():
     if output_file is None:
         output_file = os.path.splitext(args.audio_file)[0] + '.json'
 
+    # Add timestamp to filenames if requested
+    timestamp = ''
+    if args.timestamp:
+        from datetime import datetime
+        timestamp = datetime.now().strftime('_%Y%m%d_%H%M%S')
+
     # Create output directory if artist and track are provided
     if args.artist and args.track:
         output_dir = create_output_directory(args.artist, args.track)
-        json_file = os.path.join(output_dir, 'transcription.json')
-        lrc_file = os.path.join(output_dir, 'lyrics.lrc')
+        if args.skip_transcription:
+            # When skipping transcription, use original JSON as input but create new timestamped output
+            input_json = os.path.join(output_dir, 'transcription.json')
+            json_file = os.path.join(output_dir, f'transcription{timestamp}.json')
+            lrc_file = os.path.join(output_dir, f'lyrics{timestamp}.lrc')
+        else:
+            json_file = os.path.join(output_dir, f'transcription{timestamp}.json')
+            lrc_file = os.path.join(output_dir, f'lyrics{timestamp}.lrc')
     else:
-        json_file = output_file
-        lrc_file = os.path.splitext(output_file)[0] + '.lrc'
+        if args.skip_transcription:
+            # Use input file as is, but create new timestamped output
+            input_json = output_file
+            base, ext = os.path.splitext(output_file)
+            json_file = f"{base}{timestamp}.json"
+            lrc_file = f"{base}{timestamp}.lrc"
+        else:
+            base, ext = os.path.splitext(output_file)
+            json_file = f"{base}{timestamp}.json"
+            lrc_file = f"{base}{timestamp}.lrc"
 
     try:
         if args.skip_transcription:
             # Validate and load existing JSON
-            print(f"\nValidating existing JSON file: {json_file}")
-            is_valid, result = validate_json_file(json_file)
+            print(f"\nValidating existing JSON file: {input_json}")
+            is_valid, result = validate_json_file(input_json)
             if not is_valid:
                 print(f"Error: {result}")
                 sys.exit(1)
             output_data = result
             print("JSON file validated successfully")
+            
+            # Copy the validated JSON to the new timestamped location
+            with open(json_file, 'w', encoding='utf-8') as f:
+                json.dump(output_data, f, indent=2, ensure_ascii=False)
         else:
             # Set up device
             device = "cpu"
@@ -148,7 +175,7 @@ def main():
                 json.dump(output_data, f, indent=2, ensure_ascii=False)
 
         # Generate LRC file
-        generate_lrc_file(output_data, lrc_file)
+        generate_lrc_file(output_data, lrc_file, break_threshold=args.break_threshold)
         print(f"LRC file saved to: {lrc_file}")
 
         print("\nTranscription completed successfully!")

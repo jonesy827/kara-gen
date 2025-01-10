@@ -192,7 +192,7 @@ def find_best_window_match(lyrics_words, transcribed_words, start_idx, window_si
         return best_match, best_score, best_window_start + len(best_match)
     return None, 0, start_idx
 
-def generate_lrc_file(words_data, output_path):
+def generate_lrc_file(words_data, output_path, break_threshold=5.0):
     """Generate an enhanced LRC file with word-level timing, using the original lyrics as the source of truth.
     
     This function generates an LRC file that preserves the original lyrics structure while adding
@@ -204,6 +204,7 @@ def generate_lrc_file(words_data, output_path):
             - metadata (dict): Song metadata including artist, track, and original_lyrics
             - words (list): List of transcribed word dictionaries
         output_path (str): Path where the LRC file should be saved
+        break_threshold (float): Time in seconds to consider as an instrumental break (default: 5.0)
     """
     lrc_lines = []
     
@@ -222,11 +223,22 @@ def generate_lrc_file(words_data, output_path):
     lyrics_lines = [line.strip() for line in original_lyrics.split('\n')]
     lyrics_words = [line.split() for line in lyrics_lines]
     
-    # First pass: Find all confident matches
+    # First pass: Find all confident matches and detect breaks
     transcribed_idx = 0
     line_matches = []  # List of (line_idx, start_time, end_time, matched_words) tuples
+    last_word_end = 0
     
     for line_idx, line_words in enumerate(lyrics_words):
+        # Check for instrumental break before this line
+        if transcribed_idx > 0 and transcribed_idx < len(words_data['words']):
+            current_word_start = words_data['words'][transcribed_idx]['start']
+            gap_duration = current_word_start - last_word_end
+            if gap_duration >= break_threshold:
+                # Add instrumental break marker
+                break_start = format_timestamp(last_word_end)
+                break_end = format_timestamp(current_word_start)
+                line_matches.append((-1, last_word_end, current_word_start, None))  # -1 indicates break
+        
         if not line_words:  # Handle empty lines
             line_matches.append((line_idx, None, None, None))
             continue
@@ -258,6 +270,7 @@ def generate_lrc_file(words_data, output_path):
             end_time = best_match[-1]['end']
             line_matches.append((line_idx, start_time, end_time, best_match))
             transcribed_idx = best_next_idx
+            last_word_end = end_time
         else:
             line_matches.append((line_idx, None, None, None))
     
@@ -267,16 +280,29 @@ def generate_lrc_file(words_data, output_path):
     last_good_idx = -1
     
     # Find first good match
-    for i, (_, start_time, _, _) in enumerate(line_matches):
-        if start_time is not None:
+    for i, (line_idx, start_time, _, _) in enumerate(line_matches):
+        if line_idx >= 0 and start_time is not None:  # Skip break markers
             last_good_time = start_time
             last_good_idx = i
             break
     
     # Process each line
+    last_was_break = False
     for i, (line_idx, start_time, end_time, words) in enumerate(line_matches):
+        if line_idx == -1:  # Instrumental break
+            if not last_was_break:  # Only add break if we haven't just added one
+                duration = end_time - start_time
+                if lrc_lines and lrc_lines[-1] != "":  # Add blank line before break if needed
+                    lrc_lines.append("")
+                lrc_lines.append(f"[{format_timestamp(start_time)}]♪ ═══════ INSTRUMENTAL [{format_timestamp(duration)}] ═══════ ♪")
+                lrc_lines.append("")
+            last_was_break = True
+            continue
+            
+        last_was_break = False
         if not lyrics_lines[line_idx]:  # Empty line
-            lrc_lines.append("")
+            if lrc_lines and lrc_lines[-1] != "":  # Only add blank line if previous line wasn't blank
+                lrc_lines.append("")
             continue
             
         if start_time is not None:  # Good match
@@ -292,7 +318,7 @@ def generate_lrc_file(words_data, output_path):
             # Look ahead for next good match
             next_good_time = words_data['words'][-1]['end']
             for next_match in line_matches[i+1:]:
-                if next_match[1] is not None:
+                if next_match[1] is not None and next_match[0] >= 0:  # Skip breaks
                     next_good_time = next_match[1]
                     break
         else:  # Interpolate timing
