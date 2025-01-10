@@ -1,0 +1,10 @@
+openai>=1.0.0
+requests>=2.32.3
+certifi>=2024.12.14
+charset-normalizer>=3.4.1
+idna>=3.10
+urllib3>=2.3.0
+pydub>=0.25.1
+openai-whisper>=20240107
+torch>=2.2.0
+python-Levenshtein>=0.25.0 
