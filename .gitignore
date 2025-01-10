@@ -43,6 +43,8 @@ api_key.txt
 *.wav
 input*.txt
 transcribe
+combine_source.sh
+set_api_key.sh
 
 # Testing
 .pytest_cache/
