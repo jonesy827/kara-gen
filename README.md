@@ -1,15 +1,16 @@
 # kara-gen: Karaoke LRC Generator
 
-A sophisticated tool for generating word-level timed LRC (lyrics) files from audio transcriptions, using a hybrid approach of precise word matching and intelligent timing interpolation.
+A sophisticated tool for generating word-level timed LRC (lyrics) files from audio transcriptions, using a hybrid approach of precise word matching and intelligent timing interpolation. Now with support for generating karaoke audio tracks!
 
 ## Overview
 
-This tool generates high-quality karaoke LRC files by matching transcribed audio with original lyrics, ensuring every line and word has accurate timing information. It uses a combination of:
+This tool generates high-quality karaoke LRC files by matching transcribed audio with original lyrics, ensuring every line and word has accurate timing information. It can also generate separated audio tracks for karaoke use. It uses a combination of:
 
 - Sliding window word matching with adaptive sizing
 - Levenshtein distance-based word similarity scoring
 - Confidence-weighted scoring from transcription data
 - Intelligent timing interpolation for unmatched sections
+- Audio separation for karaoke tracks (lead vocals, backing vocals, instrumental)
 
 ## Key Features
 
@@ -18,6 +19,7 @@ This tool generates high-quality karaoke LRC files by matching transcribed audio
 - Preserves original lyrics structure and formatting
 - Handles parenthetical sections and line variations
 - Smart fallback for sections with low confidence matches
+- Automatic instrumental break detection
 
 ## Technical Approach
 
@@ -63,37 +65,54 @@ Word matches are scored using multiple factors:
 
 ## Usage
 
-1. Prepare your audio transcription:
-```json
-{
-  "metadata": {
-    "artist": "Artist Name",
-    "track": "Track Name",
-    "original_lyrics": "Full lyrics here..."
-  },
-  "words": [
-    {
-      "word": "transcribed",
-      "start": 1.23,
-      "end": 1.45,
-      "confidence": 0.8
-    },
-    ...
-  ]
-}
-```
+1. Prepare your audio file in a supported format (mp3, wav, flac, etc.)
 
-2. Run the generator:
+2. Run the generator with one of these modes:
 ```bash
-python3 -m src.transcribe path/to/transcription.json --artist "Artist Name" --track "Track Name"
+# Generate LRC file only (transcribes audio and matches lyrics)
+python3 -m src.transcribe path/to/audio.mp3 --artist "Artist Name" --track "Track Name"
+
+# Generate LRC file and karaoke audio tracks
+python3 -m src.transcribe path/to/audio.mp3 --artist "Artist Name" --track "Track Name" --process-audio
+
+# Only generate karaoke audio tracks (no transcription)
+python3 -m src.transcribe path/to/audio.mp3 --artist "Artist Name" --track "Track Name" --audio-only
+
+# Only fetch lyrics and generate synced LRC file
+python3 -m src.transcribe path/to/audio.mp3 --artist "Artist Name" --track "Track Name" --lyrics-only
 ```
 
-3. Get your LRC file:
+3. Get your output files:
 ```
-[ar:Artist Name]
-[ti:Track Name]
-[00:01.23]<00:01.23>First<00:01.45>word<00:01.78>with<00:02.10>timing
+output/Artist Name - Track Name/
+├── lyrics.lrc                # Karaoke lyrics file with word-level timing
+├── lyrics.txt               # Plain text lyrics
+├── transcription.json       # Transcription data with word timings
+├── lead_vocals.wav         # Separated lead vocals
+├── backing_vocals.wav      # Separated backing vocals
+└── no_vocals.wav          # Instrumental track
 ```
+
+## Models Used
+
+### 1. Audio Transcription
+Uses OpenAI's Whisper model for accurate speech-to-text with word-level timestamps:
+- Default model: 'medium' (best balance of accuracy and speed)
+- Options: 'tiny', 'base', 'small', 'medium', 'large'
+- Supports multiple languages
+- Includes confidence scores for each word
+
+### 2. Audio Separation
+Uses two specialized models for high-quality track separation:
+1. MDX23C-InstVoc model:
+   - First pass separation
+   - Splits audio into vocals and instrumental
+   - Optimized for clean vocal extraction
+
+2. 5_HP-Karaoke model:
+   - Second pass processing
+   - Separates lead and backing vocals
+   - Specialized for karaoke applications
 
 ## Implementation Details
 
@@ -128,6 +147,7 @@ The generator produces LRC files with:
 - Complete coverage of all lyrics
 - Preserved line structure and formatting
 - Clean, karaoke-ready output
+- Automatic instrumental break detection
 
 ## Future Improvements
 

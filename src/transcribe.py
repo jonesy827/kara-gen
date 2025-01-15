@@ -10,6 +10,7 @@ import whisper
 from .lyrics_fetcher import get_lyrics
 from .word_matcher import match_words_to_lyrics
 from .lrc_generator import create_output_directory, generate_lrc_file
+from .audio_processor import AudioProcessor
 
 def validate_json_file(file_path):
     """Validate that the JSON file exists and has the required structure."""
@@ -54,7 +55,106 @@ def main():
     parser.add_argument('--timestamp', action='store_true', help='Add timestamp to output filenames')
     parser.add_argument('--break-threshold', type=float, default=5.0,
                         help='Time in seconds to consider as an instrumental break (default: 5.0)')
+    parser.add_argument('--process-audio', action='store_true', help='Generate karaoke audio tracks (lead vocals, backing vocals, no vocals)')
+    parser.add_argument('--audio-only', action='store_true', help='Only process audio separation without transcription')
+    parser.add_argument('--lyrics-only', action='store_true', help='Only fetch and save lyrics without audio processing or transcription')
     args = parser.parse_args()
+
+    # If lyrics-only mode, just fetch and save lyrics then exit
+    if args.lyrics_only:
+        if not args.artist or not args.track:
+            print("Error: --artist and --track are required when using --lyrics-only")
+            sys.exit(1)
+            
+        print("\nFetching lyrics...")
+        lyrics = get_lyrics(args.artist, args.track)
+        if not lyrics:
+            print("\nFailed to fetch lyrics")
+            sys.exit(1)
+
+        # Load the Whisper model for transcription
+        print(f"\nLoading Whisper model '{args.model}'...")
+        model = whisper.load_model(args.model).cpu()  # Force CPU mode
+        print("Using CPU for transcription")
+
+        # Transcribe with word-level timestamps
+        print(f"\nTranscribing '{args.audio_file}'...")
+        result = model.transcribe(args.audio_file, word_timestamps=True)
+
+        # Extract words with timestamps
+        segments = result.get('segments', [])
+        words = []
+        for segment in segments:
+            for word_info in segment.get('words', []):
+                words.append({
+                    'word': word_info['word'].strip(),
+                    'start': word_info['start'],
+                    'end': word_info['end']
+                })
+
+        # Match words to lyrics
+        words = match_words_to_lyrics(words, lyrics)
+
+        # Create output data structure
+        output_data = {
+            'metadata': {
+                'artist': args.artist,
+                'track': args.track,
+                'model': args.model,
+                'audio_file': args.audio_file,
+                'original_lyrics': lyrics
+            },
+            'words': words
+        }
+
+        # Create output directory and save files
+        output_dir = create_output_directory(args.artist, args.track)
+        
+        # Save raw lyrics
+        lyrics_file = os.path.join(output_dir, "lyrics.txt")
+        with open(lyrics_file, 'w', encoding='utf-8') as f:
+            f.write(lyrics)
+        print(f"\nLyrics saved to: {lyrics_file}")
+
+        # Generate and save LRC file
+        lrc_file = os.path.join(output_dir, "lyrics.lrc")
+        generate_lrc_file(output_data, lrc_file, break_threshold=args.break_threshold)
+        print(f"LRC file saved to: {lrc_file}")
+
+        # Save transcription data
+        json_file = os.path.join(output_dir, "transcription.json")
+        with open(json_file, 'w', encoding='utf-8') as f:
+            json.dump(output_data, f, indent=2, ensure_ascii=False)
+        print(f"Transcription data saved to: {json_file}")
+        
+        sys.exit(0)
+
+    # If audio-only mode, just do the audio processing and exit
+    if args.audio_only:
+        if not args.artist or not args.track:
+            print("Error: --artist and --track are required when using --audio-only")
+            sys.exit(1)
+        
+        # Convert audio file path to absolute path and handle spaces
+        audio_file = os.path.abspath(args.audio_file)
+        if not os.path.exists(audio_file):
+            print(f"Error: Audio file not found: {audio_file}")
+            sys.exit(1)
+            
+        output_dir = create_output_directory(args.artist, args.track)
+        print("\nProcessing audio tracks...")
+        try:
+            processor = AudioProcessor(output_dir)
+            output_files = processor.process_audio(str(audio_file), str(args.artist), str(args.track))
+            print("\nGenerated audio files:")
+            for track_type, file_path in output_files.items():
+                print(f"- {track_type}: {os.path.basename(file_path)}")
+            sys.exit(0)
+        except Exception as e:
+            print(f"\nError processing audio: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
 
     # Determine output file path
     output_file = args.output
@@ -78,6 +178,20 @@ def main():
         else:
             json_file = os.path.join(output_dir, f'transcription{timestamp}.json')
             lrc_file = os.path.join(output_dir, f'lyrics{timestamp}.lrc')
+
+        # Process audio if requested
+        if args.process_audio:
+            print("\nProcessing audio tracks...")
+            try:
+                processor = AudioProcessor(output_dir)
+                output_files = processor.process_audio(args.audio_file, args.artist, args.track)
+                print("\nGenerated audio files:")
+                for track_type, file_path in output_files.items():
+                    print(f"- {track_type}: {os.path.basename(file_path)}")
+            except Exception as e:
+                print(f"\nError processing audio: {str(e)}")
+                if not args.skip_transcription:
+                    print("Continuing with transcription...")
     else:
         if args.skip_transcription:
             # Use input file as is, but create new timestamped output
@@ -118,7 +232,8 @@ def main():
 
             # Load the Whisper model
             print(f"\nLoading Whisper model '{args.model}'...")
-            model = whisper.load_model(args.model)
+            model = whisper.load_model(args.model).cpu()  # Force CPU mode
+            print("Using CPU for transcription")
             
             try:
                 if device == "mps":
@@ -140,7 +255,7 @@ def main():
                 original_lyrics = lyrics
 
             # Transcribe with word-level timestamps
-            result = model.transcribe(args.audio_file, word_timestamps=True)
+            result = model.transcribe(args.audio_file, word_timestamps=True, fp32=True)
 
             # Extract the segments and create word list
             segments = result.get('segments', [])

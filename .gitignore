@@ -22,8 +22,10 @@ wheels/
 
 # Virtual Environment
 venv/
+venv_py310/
 env/
 ENV/
+.env
 
 # IDEs and editors
 .idea/
@@ -38,9 +40,12 @@ models/
 analysis/
 *.lrc
 *.json
-.env
 api_key.txt
 *.wav
+*.mp3
+*.flac
+*.m4a
+*.ogg
 input*.txt
 transcribe
 combine_source.sh

@@ -53,7 +53,7 @@ from Levenshtein import distance
 from .utils import clean_word, format_timestamp
 
 def create_output_directory(artist, track):
-    """Create and return path to output directory based on artist and track name.
+    """Create and return path to output directory.
     
     Args:
         artist (str): Artist name
@@ -69,6 +69,7 @@ def create_output_directory(artist, track):
     # Create directory path
     dir_path = os.path.join('output', f"{artist} - {track}")
     os.makedirs(dir_path, exist_ok=True)
+    
     return dir_path
 
 def find_best_window_match(lyrics_words, transcribed_words, start_idx, window_size):
@@ -192,7 +193,7 @@ def find_best_window_match(lyrics_words, transcribed_words, start_idx, window_si
         return best_match, best_score, best_window_start + len(best_match)
     return None, 0, start_idx
 
-def generate_lrc_file(words_data, output_path, break_threshold=5.0):
+def generate_lrc_file(words_data, output_path=None, break_threshold=5.0):
     """Generate an enhanced LRC file with word-level timing, using the original lyrics as the source of truth.
     
     This function generates an LRC file that preserves the original lyrics structure while adding
@@ -203,14 +204,18 @@ def generate_lrc_file(words_data, output_path, break_threshold=5.0):
         words_data (dict): Dictionary containing:
             - metadata (dict): Song metadata including artist, track, and original_lyrics
             - words (list): List of transcribed word dictionaries
-        output_path (str): Path where the LRC file should be saved
+        output_path (str, optional): Path where the LRC file should be saved. If not provided,
+            will use artist and track name to generate path.
         break_threshold (float): Time in seconds to consider as an instrumental break (default: 5.0)
     """
     lrc_lines = []
     
     # Add metadata
-    lrc_lines.append("[ar:{}]".format(words_data['metadata']['artist']))
-    lrc_lines.append("[ti:{}]".format(words_data['metadata']['track']))
+    artist = words_data['metadata']['artist']
+    track = words_data['metadata']['track']
+    
+    lrc_lines.append("[ar:{}]".format(artist))
+    lrc_lines.append("[ti:{}]".format(track))
     lrc_lines.append("[length:{}]".format(format_timestamp(words_data['words'][-1]['end'])))
     
     # Get and process the original lyrics
@@ -218,6 +223,10 @@ def generate_lrc_file(words_data, output_path, break_threshold=5.0):
     if not original_lyrics:
         print("No original lyrics provided. Cannot generate LRC file.")
         return
+        
+    # If no output path provided, create one based on artist and track
+    if output_path is None:
+        dir_path = create_output_directory(artist, track)
     
     # Split lyrics into lines and words
     lyrics_lines = [line.strip() for line in original_lyrics.split('\n')]
@@ -227,6 +236,7 @@ def generate_lrc_file(words_data, output_path, break_threshold=5.0):
     transcribed_idx = 0
     line_matches = []  # List of (line_idx, start_time, end_time, matched_words) tuples
     last_word_end = 0
+    break_times = set()  # Track break timestamps to prevent duplicates
     
     for line_idx, line_words in enumerate(lyrics_words):
         # Check for instrumental break before this line
@@ -234,10 +244,11 @@ def generate_lrc_file(words_data, output_path, break_threshold=5.0):
             current_word_start = words_data['words'][transcribed_idx]['start']
             gap_duration = current_word_start - last_word_end
             if gap_duration >= break_threshold:
-                # Add instrumental break marker
-                break_start = format_timestamp(last_word_end)
-                break_end = format_timestamp(current_word_start)
-                line_matches.append((-1, last_word_end, current_word_start, None))  # -1 indicates break
+                # Only add break if we haven't seen this timestamp before
+                break_key = (last_word_end, current_word_start)
+                if break_key not in break_times:
+                    break_times.add(break_key)
+                    line_matches.append((-1, last_word_end, current_word_start, None))  # -1 indicates break
         
         if not line_words:  # Handle empty lines
             line_matches.append((line_idx, None, None, None))
